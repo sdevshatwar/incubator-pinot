@@ -32,7 +32,6 @@ import org.apache.commons.configuration.PropertiesConfiguration;
 import org.apache.pinot.common.protocols.SegmentCompletionProtocol;
 import org.apache.pinot.common.utils.CommonConstants;
 import org.apache.pinot.common.utils.StringUtil;
-import org.apache.pinot.controller.helix.core.util.HelixSetupUtils;
 import org.apache.pinot.filesystem.LocalPinotFS;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,6 +57,20 @@ public class ControllerConf extends PropertiesConfiguration {
   private static final String CONSOLE_WEBAPP_USE_HTTPS = "controller.query.console.useHttps";
   private static final String EXTERNAL_VIEW_ONLINE_TO_OFFLINE_TIMEOUT = "controller.upload.onlineToOfflineTimeout";
   private static final String CONTROLLER_MODE = "controller.mode";
+
+  public enum ControllerMode {
+    DUAL,
+    PINOT_ONLY,
+    HELIX_ONLY;
+
+    public static ControllerMode getMode(String mode) {
+      if (mode == null) {
+        LOGGER.info("No controller mode specified. Using dual mode by default.");
+        return ControllerMode.DUAL;
+      }
+      return ControllerMode.valueOf(mode.toUpperCase());
+    }
+  }
 
   public static class ControllerPeriodicTasksConf {
     // frequency configs
@@ -141,7 +154,7 @@ public class ControllerConf extends PropertiesConfiguration {
   private static final int DEFAULT_REALTIME_SEGMENT_METADATA_COMMIT_NUMLOCKS = 64;
   private static final boolean DEFAULT_ENABLE_STORAGE_QUOTA_CHECK = true;
   private static final boolean DEFAULT_ENABLE_BATCH_MESSAGE_MODE = true;
-  private static final String DEFAULT_CONTROLLER_MODE = HelixSetupUtils.ControllerMode.DUAL.name();
+  private static final ControllerMode DEFAULT_CONTROLLER_MODE = ControllerMode.DUAL;
 
   private static final String DEFAULT_PINOT_FS_FACTORY_CLASS_LOCAL = LocalPinotFS.class.getName();
 
@@ -586,13 +599,11 @@ public class ControllerConf extends PropertiesConfiguration {
     return ControllerPeriodicTasksConf.getRandomInitialDelayInSeconds();
   }
 
-  public void setControllerMode(String controllerMode) {
-    if (controllerMode != null) {
-      setProperty(CONTROLLER_MODE, controllerMode);
-    }
+  public void setControllerMode(ControllerMode controllerMode) {
+    setProperty(CONTROLLER_MODE, controllerMode.name());
   }
 
-  public String getControllerMode() {
-    return getString(CONTROLLER_MODE, DEFAULT_CONTROLLER_MODE);
+  public ControllerMode getControllerMode() {
+    return ControllerMode.getMode(getString(CONTROLLER_MODE, DEFAULT_CONTROLLER_MODE.name()));
   }
 }
