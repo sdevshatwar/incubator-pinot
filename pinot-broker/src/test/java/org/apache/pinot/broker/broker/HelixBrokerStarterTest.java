@@ -19,7 +19,6 @@
 package org.apache.pinot.broker.broker;
 
 import com.google.common.util.concurrent.Uninterruptibles;
-import com.yammer.metrics.core.MetricsRegistry;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
@@ -32,12 +31,8 @@ import java.util.concurrent.TimeUnit;
 import org.I0Itec.zkclient.ZkClient;
 import org.apache.commons.configuration.Configuration;
 import org.apache.helix.HelixAdmin;
-import org.apache.helix.HelixManager;
-import org.apache.helix.HelixManagerFactory;
-import org.apache.helix.InstanceType;
 import org.apache.helix.model.ExternalView;
 import org.apache.helix.model.IdealState;
-import org.apache.helix.model.InstanceConfig;
 import org.apache.pinot.broker.broker.helix.DefaultHelixBrokerConfig;
 import org.apache.pinot.broker.broker.helix.HelixBrokerStarter;
 import org.apache.pinot.broker.routing.HelixExternalViewBasedRouting;
@@ -47,15 +42,11 @@ import org.apache.pinot.common.config.TableConfig;
 import org.apache.pinot.common.config.TableNameBuilder;
 import org.apache.pinot.common.data.Schema;
 import org.apache.pinot.common.metadata.segment.OfflineSegmentZKMetadata;
-import org.apache.pinot.common.metrics.ControllerMetrics;
 import org.apache.pinot.common.utils.CommonConstants;
 import org.apache.pinot.common.utils.ZkStarter;
-import org.apache.pinot.controller.ControllerConf;
 import org.apache.pinot.controller.helix.ControllerRequestBuilderUtil;
+import org.apache.pinot.controller.helix.ControllerTest;
 import org.apache.pinot.controller.helix.core.PinotHelixResourceManager;
-import org.apache.pinot.controller.helix.core.realtime.PinotLLCRealtimeSegmentManager;
-import org.apache.pinot.controller.helix.core.util.HelixSetupUtils;
-import org.apache.pinot.controller.helix.starter.HelixConfig;
 import org.apache.pinot.controller.utils.SegmentMetadataMockUtils;
 import org.testng.Assert;
 import org.testng.annotations.AfterTest;
@@ -63,10 +54,9 @@ import org.testng.annotations.BeforeTest;
 import org.testng.annotations.Test;
 
 
-public class HelixBrokerStarterTest {
+public class HelixBrokerStarterTest extends ControllerTest {
   private static final int SEGMENT_COUNT = 6;
   private PinotHelixResourceManager _pinotResourceManager;
-  private static final String HELIX_CLUSTER_NAME = "TestHelixBrokerStarter";
   private static final String RAW_DINING_TABLE_NAME = "dining";
   private static final String DINING_TABLE_NAME = TableNameBuilder.OFFLINE.tableNameWithType(RAW_DINING_TABLE_NAME);
   private static final String COFFEE_TABLE_NAME = TableNameBuilder.OFFLINE.tableNameWithType("coffee");
@@ -82,30 +72,30 @@ public class HelixBrokerStarterTest {
       throws Exception {
     _zookeeperInstance = ZkStarter.startLocalZkServer();
     _zkClient = new ZkClient(ZkStarter.DEFAULT_ZK_STR);
+
+    startController();
+
     final String instanceId = "localhost_helixController";
     final boolean enableBatchMessageMode = true;
     _pinotResourceManager =
-        new PinotHelixResourceManager(ZkStarter.DEFAULT_ZK_STR, HELIX_CLUSTER_NAME, null, 10000L,
-            true, enableBatchMessageMode);
-    HelixManager helixZkManager = HelixSetupUtils
-        .setup(HELIX_CLUSTER_NAME, ZkStarter.DEFAULT_ZK_STR, instanceId, false, enableBatchMessageMode);
-    Assert.assertNotNull(helixZkManager);
-    _pinotResourceManager.start(helixZkManager);
+        new PinotHelixResourceManager(ZkStarter.DEFAULT_ZK_STR, getHelixClusterName(), instanceId, null, 10000L, true,
+            enableBatchMessageMode);
+    _pinotResourceManager.start();
     _helixAdmin = _pinotResourceManager.getHelixAdmin();
 
     _pinotHelixBrokerProperties.addProperty(CommonConstants.Helix.KEY_OF_BROKER_QUERY_PORT, 8943);
     _pinotHelixBrokerProperties
         .addProperty(CommonConstants.Broker.CONFIG_OF_BROKER_REFRESH_TIMEBOUNDARY_INFO_SLEEP_INTERVAL, 100L);
     _helixBrokerStarter =
-        new HelixBrokerStarter(HELIX_CLUSTER_NAME, ZkStarter.DEFAULT_ZK_STR, _pinotHelixBrokerProperties);
+        new HelixBrokerStarter(getHelixClusterName(), ZkStarter.DEFAULT_ZK_STR, _pinotHelixBrokerProperties);
 
     ControllerRequestBuilderUtil
-        .addFakeBrokerInstancesToAutoJoinHelixCluster(HELIX_CLUSTER_NAME, ZkStarter.DEFAULT_ZK_STR, 5, true);
+        .addFakeBrokerInstancesToAutoJoinHelixCluster(getHelixClusterName(), ZkStarter.DEFAULT_ZK_STR, 5, true);
     ControllerRequestBuilderUtil
-        .addFakeDataInstancesToAutoJoinHelixCluster(HELIX_CLUSTER_NAME, ZkStarter.DEFAULT_ZK_STR, 1, true);
+        .addFakeDataInstancesToAutoJoinHelixCluster(getHelixClusterName(), ZkStarter.DEFAULT_ZK_STR, 1, true);
 
-    while (_helixAdmin.getInstancesInClusterWithTag(HELIX_CLUSTER_NAME, "DefaultTenant_OFFLINE").size() == 0
-        || _helixAdmin.getInstancesInClusterWithTag(HELIX_CLUSTER_NAME, "DefaultTenant_BROKER").size() == 0) {
+    while (_helixAdmin.getInstancesInClusterWithTag(getHelixClusterName(), "DefaultTenant_OFFLINE").size() == 0
+        || _helixAdmin.getInstancesInClusterWithTag(getHelixClusterName(), "DefaultTenant_BROKER").size() == 0) {
       Thread.sleep(100);
     }
 
@@ -122,7 +112,7 @@ public class HelixBrokerStarterTest {
 
     Thread.sleep(1000);
 
-    ExternalView externalView = _helixAdmin.getResourceExternalView(HELIX_CLUSTER_NAME, DINING_TABLE_NAME);
+    ExternalView externalView = _helixAdmin.getResourceExternalView(getHelixClusterName(), DINING_TABLE_NAME);
     Assert.assertEquals(externalView.getPartitionSet().size(), 5);
   }
 
@@ -144,12 +134,9 @@ public class HelixBrokerStarterTest {
     Schema schema = new Schema();
     schema.setSchemaName(RAW_DINING_TABLE_NAME);
     _pinotResourceManager.addOrUpdateSchema(schema);
-    // Fake an PinotLLCRealtimeSegmentManager instance: required for a realtime table creation.
-    PinotLLCRealtimeSegmentManager
-        .create(_pinotResourceManager, new ControllerConf(), new ControllerMetrics(new MetricsRegistry()));
     _pinotResourceManager.addTable(realtimeTimeConfig);
     _helixBrokerStarter.getHelixExternalViewBasedRouting()
-        .markDataResourceOnline(realtimeTimeConfig, null, new ArrayList<InstanceConfig>());
+        .markDataResourceOnline(realtimeTimeConfig, null, new ArrayList<>());
   }
 
   @AfterTest
@@ -164,12 +151,12 @@ public class HelixBrokerStarterTest {
       throws Exception {
     IdealState idealState;
 
-    Assert.assertEquals(_helixAdmin.getInstancesInClusterWithTag(HELIX_CLUSTER_NAME, "DefaultTenant_BROKER").size(), 6);
-    idealState = _helixAdmin.getResourceIdealState(HELIX_CLUSTER_NAME, CommonConstants.Helix.BROKER_RESOURCE_INSTANCE);
+    Assert.assertEquals(_helixAdmin.getInstancesInClusterWithTag(getHelixClusterName(), "DefaultTenant_BROKER").size(), 6);
+    idealState = _helixAdmin.getResourceIdealState(getHelixClusterName(), CommonConstants.Helix.BROKER_RESOURCE_INSTANCE);
     Assert.assertEquals(idealState.getInstanceSet(DINING_TABLE_NAME).size(), SEGMENT_COUNT);
 
     ExternalView externalView =
-        _helixAdmin.getResourceExternalView(HELIX_CLUSTER_NAME, CommonConstants.Helix.BROKER_RESOURCE_INSTANCE);
+        _helixAdmin.getResourceExternalView(getHelixClusterName(), CommonConstants.Helix.BROKER_RESOURCE_INSTANCE);
     Assert.assertEquals(externalView.getStateMap(DINING_TABLE_NAME).size(), SEGMENT_COUNT);
 
     HelixExternalViewBasedRouting helixExternalViewBasedRouting =
@@ -198,8 +185,8 @@ public class HelixBrokerStarterTest {
         .setBrokerTenant("testBroker").setServerTenant("testServer").build();
     _pinotResourceManager.addTable(tableConfig);
 
-    Assert.assertEquals(_helixAdmin.getInstancesInClusterWithTag(HELIX_CLUSTER_NAME, "DefaultTenant_BROKER").size(), 6);
-    idealState = _helixAdmin.getResourceIdealState(HELIX_CLUSTER_NAME, CommonConstants.Helix.BROKER_RESOURCE_INSTANCE);
+    Assert.assertEquals(_helixAdmin.getInstancesInClusterWithTag(getHelixClusterName(), "DefaultTenant_BROKER").size(), 6);
+    idealState = _helixAdmin.getResourceIdealState(getHelixClusterName(), CommonConstants.Helix.BROKER_RESOURCE_INSTANCE);
     Assert.assertEquals(idealState.getInstanceSet(COFFEE_TABLE_NAME).size(), SEGMENT_COUNT);
     Assert.assertEquals(idealState.getInstanceSet(DINING_TABLE_NAME).size(), SEGMENT_COUNT);
 
@@ -208,13 +195,13 @@ public class HelixBrokerStarterTest {
       @Override
       public Boolean call()
           throws Exception {
-        return _helixAdmin.getResourceExternalView(HELIX_CLUSTER_NAME, CommonConstants.Helix.BROKER_RESOURCE_INSTANCE)
+        return _helixAdmin.getResourceExternalView(getHelixClusterName(), CommonConstants.Helix.BROKER_RESOURCE_INSTANCE)
             .getStateMap(COFFEE_TABLE_NAME).size() == SEGMENT_COUNT;
       }
     }, 30000L);
 
     externalView =
-        _helixAdmin.getResourceExternalView(HELIX_CLUSTER_NAME, CommonConstants.Helix.BROKER_RESOURCE_INSTANCE);
+        _helixAdmin.getResourceExternalView(getHelixClusterName(), CommonConstants.Helix.BROKER_RESOURCE_INSTANCE);
     Assert.assertEquals(externalView.getStateMap(COFFEE_TABLE_NAME).size(), SEGMENT_COUNT);
 
     // Wait up to 30s for routing table to reach the expected size
@@ -242,12 +229,12 @@ public class HelixBrokerStarterTest {
       @Override
       public Boolean call()
           throws Exception {
-        return _helixAdmin.getResourceExternalView(HELIX_CLUSTER_NAME, DINING_TABLE_NAME).getPartitionSet().size()
+        return _helixAdmin.getResourceExternalView(getHelixClusterName(), DINING_TABLE_NAME).getPartitionSet().size()
             == SEGMENT_COUNT;
       }
     }, 30000L);
 
-    externalView = _helixAdmin.getResourceExternalView(HELIX_CLUSTER_NAME, DINING_TABLE_NAME);
+    externalView = _helixAdmin.getResourceExternalView(getHelixClusterName(), DINING_TABLE_NAME);
     Assert.assertEquals(externalView.getPartitionSet().size(), SEGMENT_COUNT);
     tableArray = brokerRoutingTableBuilderMap.keySet().toArray();
     Arrays.sort(tableArray);

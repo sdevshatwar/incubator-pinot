@@ -36,6 +36,7 @@ import org.apache.pinot.common.utils.LLCSegmentName;
 import org.apache.pinot.common.utils.ZkStarter;
 import org.apache.pinot.common.utils.helix.HelixHelper;
 import org.apache.pinot.controller.helix.ControllerRequestBuilderUtil;
+import org.apache.pinot.controller.helix.ControllerTest;
 import org.apache.pinot.controller.helix.core.PinotHelixResourceManager;
 import org.apache.pinot.controller.helix.core.util.HelixSetupUtils;
 import org.apache.pinot.controller.utils.SegmentMetadataMockUtils;
@@ -54,9 +55,7 @@ import static org.testng.Assert.assertEquals;
 /**
  * Tests for the ValidationManagers.
  */
-public class ValidationManagerTest {
-  private String HELIX_CLUSTER_NAME = "TestValidationManager";
-
+public class ValidationManagerTest extends ControllerTest {
   private static final String ZK_STR = ZkStarter.DEFAULT_ZK_STR;
   private static final String CONTROLLER_INSTANCE_NAME = "localhost_11984";
   private static final String TEST_TABLE_NAME = "testTable";
@@ -77,24 +76,23 @@ public class ValidationManagerTest {
     _zkClient = new ZkClient(ZK_STR);
     Thread.sleep(1000);
 
+    startController();
+
     final boolean enableBatchMessageMode = true;
     _pinotHelixResourceManager =
-        new PinotHelixResourceManager(ZkStarter.DEFAULT_ZK_STR, HELIX_CLUSTER_NAME, null, 1000L,
-            true, enableBatchMessageMode);
-    HelixManager helixZkManager = HelixSetupUtils
-        .setup(HELIX_CLUSTER_NAME, ZK_STR, CONTROLLER_INSTANCE_NAME, false, enableBatchMessageMode);
-    Assert.assertNotNull(helixZkManager);
-    _pinotHelixResourceManager.start(helixZkManager);
+        new PinotHelixResourceManager(ZkStarter.DEFAULT_ZK_STR, getHelixClusterName(), CONTROLLER_INSTANCE_NAME, null,
+            1000L, true, enableBatchMessageMode);
+    _pinotHelixResourceManager.start();
 
-    ControllerRequestBuilderUtil.addFakeDataInstancesToAutoJoinHelixCluster(HELIX_CLUSTER_NAME, ZK_STR, 2, true);
-    ControllerRequestBuilderUtil.addFakeBrokerInstancesToAutoJoinHelixCluster(HELIX_CLUSTER_NAME, ZK_STR, 2, true);
+    ControllerRequestBuilderUtil.addFakeDataInstancesToAutoJoinHelixCluster(getHelixClusterName(), ZK_STR, 2, true);
+    ControllerRequestBuilderUtil.addFakeBrokerInstancesToAutoJoinHelixCluster(getHelixClusterName(), ZK_STR, 2, true);
 
     _offlineTableConfig =
         new TableConfig.Builder(CommonConstants.Helix.TableType.OFFLINE).setTableName(TEST_TABLE_NAME).setNumReplicas(2)
             .build();
 
     final String instanceId = "localhost_helixController";
-    _helixManager = HelixSetupUtils.setup(HELIX_CLUSTER_NAME, ZK_STR, instanceId, /*isUpdateStateModel=*/false, true);
+    _helixManager = HelixSetupUtils.setup(getHelixClusterName(), ZK_STR, instanceId, /*isUpdateStateModel=*/false, true);
     _pinotHelixResourceManager.addTable(_offlineTableConfig);
   }
 
@@ -105,7 +103,7 @@ public class ValidationManagerTest {
     String partitionName = _offlineTableConfig.getTableName();
     HelixAdmin helixAdmin = _helixManager.getClusterManagmentTool();
 
-    IdealState idealState = HelixHelper.getBrokerIdealStates(helixAdmin, HELIX_CLUSTER_NAME);
+    IdealState idealState = HelixHelper.getBrokerIdealStates(helixAdmin, getHelixClusterName());
     // Ensure that the broker resource is not rebuilt.
     Assert.assertTrue(idealState.getInstanceSet(partitionName)
         .equals(_pinotHelixResourceManager.getAllInstancesForBrokerTenant(TagNameUtils.DEFAULT_TENANT_NAME)));
@@ -123,15 +121,15 @@ public class ValidationManagerTest {
     instanceConfig.setInstanceEnabled(true);
     instanceConfig.setHostName("Broker_localhost");
     instanceConfig.setPort("2");
-    helixAdmin.addInstance(HELIX_CLUSTER_NAME, instanceConfig);
-    helixAdmin.addInstanceTag(HELIX_CLUSTER_NAME, instanceConfig.getInstanceName(),
+    helixAdmin.addInstance(getHelixClusterName(), instanceConfig);
+    helixAdmin.addInstanceTag(getHelixClusterName(), instanceConfig.getInstanceName(),
         TagNameUtils.getBrokerTagForTenant(TagNameUtils.DEFAULT_TENANT_NAME));
-    idealState = HelixHelper.getBrokerIdealStates(helixAdmin, HELIX_CLUSTER_NAME);
+    idealState = HelixHelper.getBrokerIdealStates(helixAdmin, getHelixClusterName());
     // Assert that the two don't equal before the call to rebuild the broker resource.
     Assert.assertTrue(!idealState.getInstanceSet(partitionNameTwo)
         .equals(_pinotHelixResourceManager.getAllInstancesForBrokerTenant(TagNameUtils.DEFAULT_TENANT_NAME)));
     _pinotHelixResourceManager.rebuildBrokerResourceFromHelixTags(partitionNameTwo);
-    idealState = HelixHelper.getBrokerIdealStates(helixAdmin, HELIX_CLUSTER_NAME);
+    idealState = HelixHelper.getBrokerIdealStates(helixAdmin, getHelixClusterName());
     // Assert that the two do equal after being rebuilt.
     Assert.assertTrue(idealState.getInstanceSet(partitionNameTwo)
         .equals(_pinotHelixResourceManager.getAllInstancesForBrokerTenant(TagNameUtils.DEFAULT_TENANT_NAME)));

@@ -37,6 +37,7 @@ import org.apache.pinot.common.partition.ReplicaGroupPartitionAssignmentGenerato
 import org.apache.pinot.common.utils.CommonConstants;
 import org.apache.pinot.common.utils.ZkStarter;
 import org.apache.pinot.controller.helix.ControllerRequestBuilderUtil;
+import org.apache.pinot.controller.helix.ControllerTest;
 import org.apache.pinot.controller.helix.core.PinotHelixResourceManager;
 import org.apache.pinot.controller.helix.core.util.HelixSetupUtils;
 import org.apache.pinot.controller.helix.starter.HelixConfig;
@@ -48,9 +49,8 @@ import org.testng.annotations.BeforeTest;
 import org.testng.annotations.Test;
 
 
-public class SegmentAssignmentStrategyTest {
+public class SegmentAssignmentStrategyTest extends ControllerTest {
   private final static String ZK_SERVER = ZkStarter.DEFAULT_ZK_STR;
-  private final static String HELIX_CLUSTER_NAME = "TestSegmentAssignmentStrategyHelix";
   private final static String TABLE_NAME_BALANCED = "testResourceBalanced";
   private final static String TABLE_NAME_RANDOM = "testResourceRandom";
   private final static String TABLE_NAME_REPLICA_GROUP_PARTITION_ASSIGNMENT = "testReplicaGroupPartitionAssignment";
@@ -74,38 +74,37 @@ public class SegmentAssignmentStrategyTest {
       throws Exception {
     _zookeeperInstance = ZkStarter.startLocalZkServer();
     _zkClient = new ZkClient(ZK_SERVER);
-    final String zkPath = "/" + HELIX_CLUSTER_NAME;
+    final String zkPath = "/" + getHelixClusterName();
     if (_zkClient.exists(zkPath)) {
       _zkClient.deleteRecursive(zkPath);
     }
+    startController();
+
     final String instanceId = "localhost_helixController";
     final boolean enableBatchMessageMode = true;
     _pinotHelixResourceManager =
-        new PinotHelixResourceManager(ZkStarter.DEFAULT_ZK_STR, HELIX_CLUSTER_NAME, null, 10000L,
-            true, enableBatchMessageMode);
-    HelixManager helixZkManager = HelixSetupUtils
-        .setup(HELIX_CLUSTER_NAME, ZkStarter.DEFAULT_ZK_STR, instanceId, false, enableBatchMessageMode);
-    Assert.assertNotNull(helixZkManager);
-    _pinotHelixResourceManager.start(helixZkManager);
+        new PinotHelixResourceManager(ZkStarter.DEFAULT_ZK_STR, getHelixClusterName(), instanceId, null, 10000L, true,
+            enableBatchMessageMode);
+    _pinotHelixResourceManager.start();
 
     final String helixZkURL = HelixConfig.getAbsoluteZkPathForHelix(ZK_SERVER);
     _helixZkManager =
-        HelixSetupUtils.setup(HELIX_CLUSTER_NAME, helixZkURL, instanceId, /*isUpdateStateModel=*/false, true);
+        HelixSetupUtils.setup(getHelixClusterName(), helixZkURL, instanceId, /*isUpdateStateModel=*/false, true);
     _helixAdmin = _helixZkManager.getClusterManagmentTool();
     _partitionAssignmentGenerator =
         new ReplicaGroupPartitionAssignmentGenerator(_helixZkManager.getHelixPropertyStore());
 
     ControllerRequestBuilderUtil
-        .addFakeDataInstancesToAutoJoinHelixCluster(HELIX_CLUSTER_NAME, ZK_SERVER, _numServerInstance, true);
+        .addFakeDataInstancesToAutoJoinHelixCluster(getHelixClusterName(), ZK_SERVER, _numServerInstance, true);
     ControllerRequestBuilderUtil
-        .addFakeBrokerInstancesToAutoJoinHelixCluster(HELIX_CLUSTER_NAME, ZK_SERVER, _numBrokerInstance, true);
+        .addFakeBrokerInstancesToAutoJoinHelixCluster(getHelixClusterName(), ZK_SERVER, _numBrokerInstance, true);
     Thread.sleep(100);
-    Assert.assertEquals(_helixAdmin.getInstancesInClusterWithTag(HELIX_CLUSTER_NAME, "DefaultTenant_OFFLINE").size(),
+    Assert.assertEquals(_helixAdmin.getInstancesInClusterWithTag(getHelixClusterName(), "DefaultTenant_OFFLINE").size(),
         _numServerInstance);
-    Assert.assertEquals(_helixAdmin.getInstancesInClusterWithTag(HELIX_CLUSTER_NAME, "DefaultTenant_REALTIME").size(),
+    Assert.assertEquals(_helixAdmin.getInstancesInClusterWithTag(getHelixClusterName(), "DefaultTenant_REALTIME").size(),
         _numServerInstance);
 
-    Assert.assertEquals(_helixAdmin.getInstancesInClusterWithTag(HELIX_CLUSTER_NAME, "DefaultTenant_BROKER").size(),
+    Assert.assertEquals(_helixAdmin.getInstancesInClusterWithTag(getHelixClusterName(), "DefaultTenant_BROKER").size(),
         _numBrokerInstance);
   }
 
@@ -145,7 +144,7 @@ public class SegmentAssignmentStrategyTest {
         instanceToNumSegmentsMap.put(instance, 0);
       }
       IdealState idealState = _helixAdmin
-          .getResourceIdealState(HELIX_CLUSTER_NAME, TableNameBuilder.OFFLINE.tableNameWithType(TABLE_NAME_RANDOM));
+          .getResourceIdealState(getHelixClusterName(), TableNameBuilder.OFFLINE.tableNameWithType(TABLE_NAME_RANDOM));
       Assert.assertEquals(idealState.getPartitionSet().size(), i + 1);
       for (final String segmentId : idealState.getPartitionSet()) {
         Assert.assertEquals(idealState.getInstanceStateMap(segmentId).size(), NUM_REPLICA);
@@ -182,7 +181,7 @@ public class SegmentAssignmentStrategyTest {
       instance2NumSegmentsMap.put(instance, 0);
     }
     final IdealState idealState = _helixAdmin
-        .getResourceIdealState(HELIX_CLUSTER_NAME, TableNameBuilder.OFFLINE.tableNameWithType(TABLE_NAME_BALANCED));
+        .getResourceIdealState(getHelixClusterName(), TableNameBuilder.OFFLINE.tableNameWithType(TABLE_NAME_BALANCED));
     for (final String segmentId : idealState.getPartitionSet()) {
       for (final String instance : idealState.getInstanceStateMap(segmentId).keySet()) {
         instance2NumSegmentsMap.put(instance, instance2NumSegmentsMap.get(instance) + 1);
@@ -200,7 +199,7 @@ public class SegmentAssignmentStrategyTest {
       Assert.assertTrue(instance2NumSegmentsMap.get(instance) <= maxNumSegmentsPerInstance,
           "expected <=" + maxNumSegmentsPerInstance + " actual:" + instance2NumSegmentsMap.get(instance));
     }
-    _helixAdmin.dropResource(HELIX_CLUSTER_NAME, TableNameBuilder.OFFLINE.tableNameWithType(TABLE_NAME_BALANCED));
+    _helixAdmin.dropResource(getHelixClusterName(), TableNameBuilder.OFFLINE.tableNameWithType(TABLE_NAME_BALANCED));
   }
 
   @Test
@@ -294,7 +293,7 @@ public class SegmentAssignmentStrategyTest {
     ReplicaGroupPartitionAssignment partitionAssignment =
         _partitionAssignmentGenerator.getReplicaGroupPartitionAssignment(offlineTableName);
 
-    IdealState idealState = _helixAdmin.getResourceIdealState(HELIX_CLUSTER_NAME,
+    IdealState idealState = _helixAdmin.getResourceIdealState(getHelixClusterName(),
         TableNameBuilder.OFFLINE.tableNameWithType(TABLE_NAME_TABLE_LEVEL_REPLICA_GROUP));
 
     // Validate the segment assignment
@@ -354,7 +353,7 @@ public class SegmentAssignmentStrategyTest {
     ReplicaGroupPartitionAssignment partitionAssignment =
         _partitionAssignmentGenerator.getReplicaGroupPartitionAssignment(offlineTable);
 
-    IdealState idealState = _helixAdmin.getResourceIdealState(HELIX_CLUSTER_NAME,
+    IdealState idealState = _helixAdmin.getResourceIdealState(getHelixClusterName(),
         TableNameBuilder.OFFLINE.tableNameWithType(TABLE_NAME_PARTITION_LEVEL_REPLICA_GROUP));
 
     // Validate the segment assignment
@@ -365,7 +364,7 @@ public class SegmentAssignmentStrategyTest {
 
   private boolean allSegmentsPushedToIdealState(String tableName, int segmentNum) {
     IdealState idealState =
-        _helixAdmin.getResourceIdealState(HELIX_CLUSTER_NAME, TableNameBuilder.OFFLINE.tableNameWithType(tableName));
+        _helixAdmin.getResourceIdealState(getHelixClusterName(), TableNameBuilder.OFFLINE.tableNameWithType(tableName));
     return idealState != null && idealState.getPartitionSet() != null
         && idealState.getPartitionSet().size() == segmentNum;
   }
